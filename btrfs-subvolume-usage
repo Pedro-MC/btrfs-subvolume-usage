@@ -1,6 +1,8 @@
 #!/bin/sh
 ##############################################################################
 #
+#    btrfs-subvolume-usage 1.0.0
+#
 #    Copyright 2017 Pedro Miguel Carvalho <PedroMC@pmc.com.pt>
 #
 #
@@ -55,13 +57,15 @@ function print_usage {
 	$PRINT "Usage: $0 [OPTIONS]"
 	$PRINT " OPTIONS"
 	$PRINT " -h  --help --usage      : Show this usage information."
-	$PRINT " -pPATH --path=PATH      : Path to a mounted btrfs file system (optional, defaults to /)."
-	$PRINT " -h0|1 --header=on|off   : Turn on/off the header (defaults to on)."
-	$PRINT " -p0|1 --padding=on|off  : Turn on/off the column padding (defaults to on)."
-	$PRINT " -cCID:* --columns=CID:* : Colon separated list of column IDs to display."
-	$PRINT " -sN   --sort=N          : Sort the rows using the Nth column (defaults to the last column)."
-	$PRINT " -sCID --sort=CID        : Sort the rows using the CID column"
+	$PRINT " --version               : Show the version information."
+	$PRINT " -pPATH --path=PATH      : Path to a mounted btrfs file system (default: /)."
+	$PRINT " -h0|1 --header=on|off   : Turn on/off the header (default: on)."
+	$PRINT " -p0|1 --padding=on|off  : Turn on/off the column padding (default: on)."
 	$PRINT " -rs  --reverse-sort     : Reverse sort order."
+	$PRINT " -sN   --sort=N          : Sort the rows using the Nth column (default: last column)."
+	$PRINT " -sCID --sort=CID        : Sort the rows using the CID column."
+	$PRINT " -cCID:* --columns=CID:* : Colon separated list of column IDs to display"
+	$PRINT "                           (default: display all)."
 	$PRINT " Column IDs (CID)        : QGROUPID, TOTAL, EXCLUSIVE, SHARED, SHARED%, PATH."
 	[ "$SHOW_USAGE" == "ERROR" ] && exit 1 || exit 0
 }
@@ -191,6 +195,9 @@ function parse_arguments {
 	case "$ARG" in
 		-h | --help)
 			SHOW_USAGE="Y"
+		;;
+		--version)
+			echo "btrfs-subvolume-usage 1.0.0"
 		;;
 		-rs | --reverse-sort)
 			SORT_ORDER="-r"
