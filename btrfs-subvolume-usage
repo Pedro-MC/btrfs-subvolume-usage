@@ -1,0 +1,293 @@
+#!/bin/sh
+##############################################################################
+#
+#    Copyright 2017 Pedro Miguel Carvalho <PedroMC@pmc.com.pt>
+#
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
+
+function err_echo {
+	echo "$@" >&2
+}
+
+function abort {
+	local MSG=$1
+	err_echo "ABORT: $MSG"
+	exit 1
+}
+
+function print_padded_right {
+	local STR="$1"
+	local SIZE="$2"
+	local PAD="                                             "
+	local PAD_SIZE
+	[ "${#STR}" -ge "$SIZE" -o "$SHOW_PADDING" == "N" ] && PAD_SIZE=0 || PAD_SIZE=$(($SIZE - ${#STR}))
+	local PAD="${PAD:0:$PAD_SIZE}"
+	echo -n "${STR}${PAD}"
+}
+
+function print_padded_left {
+	local STR="$1"
+	local SIZE="$2"
+	local PAD="                                             "
+	local PAD_SIZE
+	[ "${#STR}" -ge "$SIZE" -o "$SHOW_PADDING" == "N" ] && PAD_SIZE=0 || PAD_SIZE=$(($SIZE - ${#STR}))
+	local PAD="${PAD:0:$PAD_SIZE}"
+	echo -n "${PAD}${STR}"
+}
+
+function print_usage {
+	local PRINT
+	[ "$SHOW_USAGE" == "ERROR" ] && PRINT="err_echo" || PRINT="echo"
+	$PRINT "Usage: $0 [OPTIONS]"
+	$PRINT " OPTIONS"
+	$PRINT " -h  --help --usage      : Show this usage information."
+	$PRINT " -pPATH --path=PATH      : Path to a mounted btrfs file system (optional, defaults to /)."
+	$PRINT " -h0|1 --header=on|off   : Turn on/off the header (defaults to on)."
+	$PRINT " -p0|1 --padding=on|off  : Turn on/off the column padding (defaults to on)."
+	$PRINT " -cCID:* --columns=CID:* : Colon separated list of column IDs to display."
+	$PRINT " -sN   --sort=N          : Sort the rows using the Nth column (defaults to the last column)."
+	$PRINT " -sCID --sort=CID        : Sort the rows using the CID column"
+	$PRINT " -rs  --reverse-sort     : Reverse sort order."
+	$PRINT " Column IDs (CID)        : QGROUPID, TOTAL, EXCLUSIVE, SHARED, SHARED%, PATH."
+	[ "$SHOW_USAGE" == "ERROR" ] && exit 1 || exit 0
+}
+
+function print_usage_error {
+	local MSG="$1"
+	err_echo "ERROR: $MSG"
+	[ "$SHOW_USAGE" == "N" ] && SHOW_USAGE="ERROR"
+}
+
+function count_columns {
+	local COLUMNS="$1"
+	local COLUMN
+	local COUNT=0
+	for COLUMN in ${COLUMNS//:/ } ; do
+		COUNT=$(( $COUNT + 1 ))
+	done
+	echo $COUNT
+}
+
+function print_header {
+	local H1=""
+	local H2=""
+	[ "${SHOW_COLUMN["QGROUPID"]}"  == "Y" ] && H1="$H1 qgroup ID"    && H2="$H2 ========="
+	[ "${SHOW_COLUMN["TOTAL"]}"     == "Y" ] && H1="$H1 total  MB"    && H2="$H2 ========="
+	[ "${SHOW_COLUMN["EXCLUSIVE"]}" == "Y" ] && H1="$H1 exclusive MB" && H2="$H2 ============"
+	[ "${SHOW_COLUMN["SHARED"]}"    == "Y" ] && H1="$H1 shared MB"    && H2="$H2 ========="
+	[ "${SHOW_COLUMN["SHARED%"]}"   == "Y" ] && H1="$H1 shared %"     && H2="$H2 ========"
+	[ "${SHOW_COLUMN["PATH"]}"      == "Y" ] && H1="$H1 path"         && H2="$H2 ===="
+	echo "${H1:1}"
+	echo "${H2:1}"
+}
+
+function print_row {
+	local QGROUPID="$1"
+	local RFER="$2"
+	local EXCL="$3"
+	local MB=$((1024 * 1024))
+	local SHARED_P=""
+	
+	[ "$RFER" == "0" ] && SHARED_P=0 || SHARED_P=$(( ($RFER - $EXCL) * 100 / $RFER ))
+
+	[ "${SHOW_COLUMN["QGROUPID"]}"  == "Y" ] && print_padded_right "$QGROUPID" 9 && echo -n " "
+	[ "${SHOW_COLUMN["TOTAL"]}"     == "Y" ] && print_padded_left $(( $RFER / $MB )) 9 && echo -n " "
+	[ "${SHOW_COLUMN["EXCLUSIVE"]}" == "Y" ] && print_padded_left $(( $EXCL / $MB )) 12 && echo -n " "
+	[ "${SHOW_COLUMN["SHARED"]}"    == "Y" ] && print_padded_left $(( ($RFER - $EXCL) / $MB )) 9 && echo -n " "
+	[ "${SHOW_COLUMN["SHARED%"]}"   == "Y" ] && print_padded_left "$SHARED_P" 8 && echo -n " "
+	[ "${SHOW_COLUMN["PATH"]}"      == "Y" ] && echo -n ${SV_PATH[$QGROUPID]}
+	echo
+}
+
+function get_sort_key {
+	local SORT_COLUMN="$1"
+	local COLUMN
+	local KEY=0
+	for COLUMN in "QGROUPID" "TOTAL" "EXCLUSIVE" "SHARED" "SHARED%" "PATH" ; do
+		[ "${SHOW_COLUMN[$COLUMN]}"  == "Y" ] && KEY=$(($KEY + 1))
+		[ "$SORT_COLUMN" == "$COLUMN"       ] && echo $KEY && return	
+	done
+	abort "get_sort_key : invalid state."
+}
+
+function get_sort_column {
+	local SORT_KEY="$1"
+	local COLUMN
+	local KEY=0
+	for COLUMN in "QGROUPID" "TOTAL" "EXCLUSIVE" "SHARED" "SHARED%" "PATH" ; do
+		[ "${SHOW_COLUMN[$COLUMN]}"  == "Y" ] && KEY=$(($KEY + 1))
+		if [ "$SORT_KEY" == "$KEY" ]; then
+			echo $COLUMN
+			return	
+		fi
+	done
+	echo "X"
+}
+
+function get_sort_numeric {
+	local SORT_COLUMN="$1"
+	[ "$SORT_COLUMN" == "PATH" ] || echo " " -n
+}
+
+function is_valid_column_id {
+	local ID="$1"
+	case "$ID" in
+		QGROUPID | TOTAL | EXCLUSIVE | SHARED | SHARED% | PATH)
+			echo "Y"
+		;;
+		*)
+			echo "N"
+		;;
+	esac
+}
+
+function parse_columns_list {
+	local ARG="$1"
+	local SHIFT="$2"
+	local INVALID_COLUMNS=""
+	local C
+	SHOW_COLUMNS=":${ARG:$SHIFT}:"
+	for C in ${SHOW_COLUMNS//:/ } ; do
+		[ "$(is_valid_column_id "$C")" == "N" ] && INVALID_COLUMNS="$INVALID_COLUMNS:$C"
+	done
+	[ -z "$INVALID_COLUMNS" ] || print_usage_error "Invalid column ID(s) '${INVALID_COLUMNS:1}' in '$ARG'."
+}
+
+function parse_sort_column {
+	local ARG="$1"
+	local SHIFT="$2"
+	local COLUMN="${ARG:$SHIFT}"
+	if [ "$(is_valid_column_id "$COLUMN")" == "Y" ]; then
+		SORT_COLUMN="$COLUMN"
+		SORT_BY_KEY="N"
+	else
+		print_usage_error "Invalid column ID '$COLUMN' in '$ARG'."
+	fi
+}
+
+function parse_sort_key {
+	local ARG="$1"
+	local SHIFT="$2"
+	SORT_KEY="${ARG:$SHIFT}"
+	SORT_BY_KEY="Y"
+}
+
+function parse_arguments {
+	for ARG in "$@" ; do
+	case "$ARG" in
+		-h | --help)
+			SHOW_USAGE="Y"
+		;;
+		-rs | --reverse-sort)
+			SORT_ORDER="-r"
+		;;
+		-s[0-9])
+			parse_sort_key "$ARG" 2
+		;;
+		--sort=[0-9])
+			parse_sort_key "$ARG" 7
+		;;
+		-s*)
+			parse_sort_column "$ARG" 2
+		;;
+		--sort=*)
+			parse_sort_column "$ARG" 7
+		;;
+		-h1 | --header=on)
+			SHOW_HEADER="Y"
+		;;
+		-h0 | --header=off)
+			SHOW_HEADER="N"
+		;;
+		-p1 | --padding=on)
+			SHOW_PADDING="Y"
+		;;
+		-p0 | --padding=off)
+		 	SHOW_PADDING="N"
+		;;
+		-c*)
+			parse_columns_list "$ARG" 2
+		;;
+		--columns=*)
+			parse_columns_list "$ARG" 10
+		;;
+		-p*)
+			BTRFS_PATH="${ARG:2}"
+		;;
+		--path=*)
+			BTRFS_PATH="${ARG:7}"
+		;; 
+		*)
+			print_usage_error "Invalid option $ARG."
+		;;
+	esac
+	done
+	# Prepare columns.
+	for C in ${SHOW_COLUMNS//:/ } ; do
+		SHOW_COLUMN[$C]="Y"
+	done
+	# Prepare sort.
+	if [ "$SORT_BY_KEY" == "Y" ]; then
+		NUM_COLUMNS=$(count_columns $SHOW_COLUMNS)
+		[ -z "$SORT_KEY" ] && SORT_KEY=$NUM_COLUMNS
+		SORT_COLUMN=$(get_sort_column $SORT_KEY)
+		[ -z "${SHOW_COLUMN[$SORT_COLUMN]}" ] && print_usage_error "The sort column number $SORT_KEY is greater than the number of selected column $NUM_COLUMNS."
+	else
+		# Check if sort column is one of the columns to be shown.
+		[ -z "${SHOW_COLUMN[$SORT_COLUMN]}" ] && print_usage_error "The sort column $SORT_COLUMN is not one of the selected columns ${SHOW_COLUMNS:1:-1}."
+		# Get sort key and numeric.
+		SORT_KEY=$(get_sort_key $SORT_COLUMN)
+	fi
+	SORT_NUMERIC=$(get_sort_numeric $SORT_COLUMN)
+	# Show usage?
+	[ "$SHOW_USAGE" == "N" ] || print_usage
+}
+
+# Defaults
+BTRFS_PATH="/"
+SHOW_USAGE="N"
+SHOW_HEADER="Y"
+SHOW_PADDING="Y"
+SHOW_COLUMNS=":QGROUPID:TOTAL:EXCLUSIVE:SHARED:SHARED%:PATH:"
+SORT_BY_KEY="Y"
+SORT_COLUMN=""
+SORT_KEY="" # Last column
+SORT_ORDER=""
+SORT_NUMERIC=""
+
+declare -A SHOW_COLUMN
+parse_arguments "$@"
+
+# Do the work
+btrfs subvolume list -t "$BTRFS_PATH" | (
+	read
+	read
+	declare -A SV_PATH
+	while read ID gen top_level path ; do
+		qgroupid="0/$ID"
+		SV_PATH[$qgroupid]=$path
+	done
+	
+	btrfs qgroup show --raw "$BTRFS_PATH" | (
+		read
+		read
+		[ "$SHOW_HEADER" == "Y" ] && print_header
+		while read QGROUPID RFER EXCL ; do
+			print_row "$QGROUPID" "$RFER" "$EXCL"
+		done | sort -k $SORT_KEY $SORT_NUMERIC $SORT_ORDER
+	)
+)
