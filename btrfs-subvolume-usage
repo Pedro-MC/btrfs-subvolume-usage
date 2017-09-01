@@ -51,6 +51,11 @@ function print_padded_left {
 	echo -n "${PAD}${STR}"
 }
 
+function print_version {
+	echo "btrfs-subvolume-usage 1.0.0"
+	exit 0
+}
+
 function print_usage {
 	local PRINT
 	[ "$SHOW_USAGE" == "ERROR" ] && PRINT="err_echo" || PRINT="echo"
@@ -193,11 +198,11 @@ function parse_sort_key {
 function parse_arguments {
 	for ARG in "$@" ; do
 	case "$ARG" in
-		-h | --help)
+		-h | --help | --usage)
 			SHOW_USAGE="Y"
 		;;
 		--version)
-			echo "btrfs-subvolume-usage 1.0.0"
+			SHOW_VERSION="Y"
 		;;
 		-rs | --reverse-sort)
 			SORT_ORDER="-r"
@@ -262,6 +267,8 @@ function parse_arguments {
 	SORT_NUMERIC=$(get_sort_numeric $SORT_COLUMN)
 	# Show usage?
 	[ "$SHOW_USAGE" == "N" ] || print_usage
+	# Show version=
+	[ "$SHOW_VERSION" == "Y" ] && print_version
 }
 
 # Defaults
